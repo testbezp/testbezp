@@ -1,0 +1,26 @@
+Copyright 2012 The Go Authors. All rights reserved.
+     2	:: Use of this source code is governed by a BSD-style
+     3	:: license that can be found in the LICENSE file.
+     4	@echo off
+     5	
+     6	setlocal
+     7	
+     8	if exist make.bat goto ok
+     9	echo all.bat must be run from go\src
+    10	:: cannot exit: would kill parent command interpreter
+    11	goto end
+    12	:ok
+    13	
+    14	set OLDPATH=%PATH%
+    15	call make.bat --no-banner --no-local
+    16	if %GOBUILDFAIL%==1 goto end
+    17	call run.bat --no-rebuild --no-local
+    18	if %GOBUILDFAIL%==1 goto end
+    19	:: we must restore %PATH% before running "dist banner" so that the latter
+    20	:: can get the original %PATH% and give suggestion to add %GOROOT%/bin
+    21	:: to %PATH% if necessary.
+    22	set PATH=%OLDPATH%
+    23	"%GOTOOLDIR%/dist" banner
+    24	
+    25	:end
+    26	if x%GOBUILDEXIT%==x1 exit %GOBUILDFAIL%
