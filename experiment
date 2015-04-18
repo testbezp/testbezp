@@ -1,0 +1,120 @@
+  1	:: Copyright 2012 The Go Authors. All rights reserved.
+     2	:: Use of this source code is governed by a BSD-style
+     3	:: license that can be found in the LICENSE file.
+     4	
+     5	:: Environment variables that control make.bat:
+     6	::
+     7	:: GOROOT_FINAL: The expected final Go root, baked into binaries.
+     8	:: The default is the location of the Go tree during the build.
+     9	::
+    10	:: GOHOSTARCH: The architecture for host tools (compilers and
+    11	:: binaries).  Binaries of this type must be executable on the current
+    12	:: system, so the only common reason to set this is to set
+    13	:: GOHOSTARCH=386 on an amd64 machine.
+    14	::
+    15	:: GOARCH: The target architecture for installed packages and tools.
+    16	::
+    17	:: GOOS: The target operating system for installed packages and tools.
+    18	::
+    19	:: GO_GCFLAGS: Additional 5g/6g/8g arguments to use when
+    20	:: building the packages and commands.
+    21	::
+    22	:: GO_LDFLAGS: Additional 5l/6l/8l arguments to use when
+    23	:: building the commands.
+    24	::
+    25	:: CGO_ENABLED: Controls cgo usage during the build. Set it to 1
+    26	:: to include all cgo related files, .c and .go file with "cgo"
+    27	:: build directive, in the build. Set it to 0 to ignore them.
+    28	
+    29	@echo off
+    30	
+    31	:: Keep environment variables within this script
+    32	:: unless invoked with --no-local.
+    33	if x%1==x--no-local goto nolocal
+    34	if x%2==x--no-local goto nolocal
+    35	setlocal
+    36	:nolocal
+    37	
+    38	set GOBUILDFAIL=0
+    39	
+    40	if exist make.bat goto ok
+    41	echo Must run make.bat from Go src directory.
+    42	goto fail 
+    43	:ok
+    44	
+    45	:: Clean old generated file that will cause problems in the build.
+    46	del /F ".\pkg\runtime\runtime_defs.go" 2>NUL
+    47	
+    48	:: Grab default GOROOT_FINAL and set GOROOT for build.
+    49	:: The expression %VAR:\=\\% means to take %VAR%
+    50	:: and apply the substitution \ = \\, escaping the
+    51	:: backslashes.  Then we wrap that in quotes to create
+    52	:: a C string.
+    53	cd ..
+    54	set GOROOT=%CD%
+    55	cd src
+    56	if "x%GOROOT_FINAL%"=="x" set GOROOT_FINAL=%GOROOT%
+    57	set DEFGOROOT=-DGOROOT_FINAL="\"%GOROOT_FINAL:\=\\%\""
+    58	
+    59	echo # Building C bootstrap tool.
+    60	echo cmd/dist
+    61	if not exist ..\bin\tool mkdir ..\bin\tool
+    62	:: Windows has no glob expansion, so spell out cmd/dist/*.c.
+    63	gcc -O2 -Wall -Werror -o cmd/dist/dist.exe -Icmd/dist %DEFGOROOT% cmd/dist/buf.c cmd/dist/build.c cmd/dist/buildgc.c cmd/dist/buildgo.c cmd/dist/buildruntime.c cmd/dist/main.c cmd/dist/windows.c cmd/dist/arm.c
+    64	if errorlevel 1 goto fail
+    65	.\cmd\dist\dist env -wp >env.bat
+    66	if errorlevel 1 goto fail
+    67	call env.bat
+    68	del env.bat
+    69	echo.
+    70	
+    71	if x%1==x--dist-tool goto copydist
+    72	if x%2==x--dist-tool goto copydist
+    73	
+    74	echo # Building compilers and Go bootstrap tool.
+    75	set buildall=-a
+    76	if x%1==x--no-clean set buildall=
+    77	.\cmd\dist\dist bootstrap %buildall% -v
+    78	if errorlevel 1 goto fail
+    79	:: Delay move of dist tool to now, because bootstrap cleared tool directory.
+    80	move .\cmd\dist\dist.exe "%GOTOOLDIR%\dist.exe"
+    81	"%GOTOOLDIR%\go_bootstrap" clean -i std
+    82	echo.
+    83	
+    84	if not %GOHOSTARCH% == %GOARCH% goto localbuild
+    85	if not %GOHOSTOS% == %GOOS% goto localbuild
+    86	goto mainbuild
+    87	
+    88	:localbuild
+    89	echo # Building tools for local system. %GOHOSTOS%/%GOHOSTARCH%
+    90	setlocal
+    91	set GOOS=%GOHOSTOS%
+    92	set GOARCH=%GOHOSTARCH%
+    93	"%GOTOOLDIR%\go_bootstrap" install -gcflags "%GO_GCFLAGS%" -ldflags "%GO_LDFLAGS%" -v std
+    94	endlocal
+    95	if errorlevel 1 goto fail
+    96	echo.
+    97	
+    98	:mainbuild
+    99	echo # Building packages and commands.
+   100	"%GOTOOLDIR%\go_bootstrap" install -gcflags "%GO_GCFLAGS%" -ldflags "%GO_LDFLAGS%" -a -v std
+   101	if errorlevel 1 goto fail
+   102	del "%GOTOOLDIR%\go_bootstrap.exe"
+   103	echo.
+   104	
+   105	if x%1==x--no-banner goto nobanner
+   106	"%GOTOOLDIR%\dist" banner
+   107	:nobanner
+   108	
+   109	goto end
+   110	
+   111	:copydist
+   112	mkdir "%GOTOOLDIR%" 2>NUL
+   113	copy cmd\dist\dist.exe "%GOTOOLDIR%\"
+   114	goto end
+   115	
+   116	:fail
+   117	set GOBUILDFAIL=1
+   118	if x%GOBUILDEXIT%==x1 exit %GOBUILDFAIL%
+   119	
+   120	:end
